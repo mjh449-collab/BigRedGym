@@ -16,7 +16,9 @@ def test_height_reward_has_meter_tolerance_independent_of_observation_scale():
     task.base_height_command = torch.full((5, 1), 0.30)
     task.base_height = torch.tensor([[0.30], [0.25], [0.35], [0.20], [0.40]])
     task.scales = {"base_height": 0.3}
-    expected = torch.tensor([1.0, math.exp(-1), math.exp(-1), math.exp(-4), math.exp(-4)])
+    expected = torch.tensor(
+        [1.0, math.exp(-1), math.exp(-1), math.exp(-4), math.exp(-4)]
+    )
     torch.testing.assert_close(task._reward_tracking_base_height(), expected)
     task.scales["base_height"] = 100.0
     torch.testing.assert_close(task._reward_tracking_base_height(), expected)
@@ -44,4 +46,7 @@ def test_command_sampler_trains_endpoints_and_standing_without_touching_other_en
     assert (height == lo).float().mean().item() == pytest.approx(0.25, abs=0.04)
     assert (height == hi).float().mean().item() == pytest.approx(0.25, abs=0.04)
     stopped = (task.commands[mask] == 0).all(dim=1).float().mean().item()
-    assert stopped == pytest.approx(0.7, abs=0.04)
+    # The two earlier 20% drop masks also occasionally produce a full stop.
+    probability = task.cfg.commands.standing_probability
+    expected_stopped = probability + (1 - probability) * 0.2 * 0.2
+    assert stopped == pytest.approx(expected_stopped, abs=0.04)

@@ -346,3 +346,22 @@ def test_viewer_configs_default_show_ui_false():
 
     assert LeggedRobotCfg.viewer.show_ui is False
     assert FixedRobotCfg.viewer.show_ui is False
+
+
+def test_teleop_respects_training_limits_and_starts_at_a_known_height():
+    env = FakeEnv()
+    env.cfg.commands.ranges.lin_vel_x = [-0.5, 0.0, 0.5, 1.0, 2.0]
+    env.cfg.commands.ranges.lin_vel_y = 0.5
+    env.cfg.commands.ranges.yaw_vel = 1.5
+    env.cfg.reward_settings = SimpleNamespace(base_height_target=0.30)
+    env.base_height_command[:] = 0.25
+    ui = MujocoKeyboardInterface(env)
+    assert torch.all(env.commands == 0)
+    torch.testing.assert_close(env.base_height_command, torch.full((2, 1), 0.30))
+    ui._on_key(ord("I"))
+    assert env.commands[0, 0].item() == pytest.approx(0.25)
+    for _ in range(40):
+        ui._on_key(ord("I"))
+        ui._on_key(ord("J"))
+        ui._on_key(ord("N"))
+    torch.testing.assert_close(env.commands, torch.tensor([[2.0, 0.5, 1.5]] * 2))

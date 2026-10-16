@@ -38,7 +38,9 @@ class Go2TrotCfg(Go2Cfg):
         stiffness = {"hip": 20.0, "thigh": 20.0, "calf": 20.0}
         damping = {"hip": 0.5, "thigh": 0.5, "calf": 0.5}
         ctrl_frequency = 50
-        desired_sim_frequency = 200
+        # Three physics substeps per action: faster than 200 Hz while
+        # retaining the height-tracking accuracy checked at this timestep.
+        desired_sim_frequency = 150
         gait_freq = [1.0, 3.0]  # oscillator frequency range [Hz]
         # Cycle offsets define a trot: front-left/rear-right move together,
         # half a cycle away from front-right/rear-left.
@@ -59,7 +61,7 @@ class Go2TrotCfg(Go2Cfg):
         # Standard deviation in m/s around the forward-command centers below.
         var = 0.1
         resampling_time = 3.0
-        standing_probability = 0.7
+        standing_probability = 0.3
         height_endpoint_probability = 0.5
 
         class ranges(Go2Cfg.commands.ranges):
@@ -166,9 +168,9 @@ class Go2TrotRunnerCfg(Go2RunnerCfg):
 
         class reward:
             class weights:
-                tracking_lin_vel = 1.0
-                tracking_ang_vel = 1.0
-                tracking_base_height = 8.0
+                tracking_lin_vel = 4.0
+                tracking_ang_vel = 2.0
+                tracking_base_height = 4.0
                 lin_vel_z = 0.0
                 ang_vel_xy = 0.1
                 orientation = 1.0

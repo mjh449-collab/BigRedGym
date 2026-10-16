@@ -6,6 +6,7 @@ Subclasses implement tensor allocation, step, reset, and rendering.
 """
 
 import os
+import warnings
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -211,7 +212,7 @@ class MuJocoBackendBase(SimBackend):
         spec.option.disableflags = cfg.mujoco.disableflags
 
         mjm = spec.compile()
-        if visual_model_path is not None:
+        if visual_model_path is not None and os.path.isfile(visual_model_path):
             # Group 3 is hidden by default in MuJoCo. Keep collision geometry
             # available for inspection without covering the detailed visuals.
             collision = (mjm.geom_contype != 0) | (mjm.geom_conaffinity != 0)
@@ -448,7 +449,15 @@ class MuJocoBackendBase(SimBackend):
         """
         root = ET.parse(urdf_path).getroot()
         if visual_model_path is not None:
-            replace_visuals_from_mjcf(root, visual_model_path)
+            if os.path.isfile(visual_model_path):
+                replace_visuals_from_mjcf(root, visual_model_path)
+            else:
+                warnings.warn(
+                    f"Optional visual model not found: {visual_model_path}; "
+                    "using URDF geometry for rendering.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
         has_unsupported = any(
             (m.get("filename") or "").lower().endswith((".dae", ".collada"))
             for m in root.iter("mesh")

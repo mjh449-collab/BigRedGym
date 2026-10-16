@@ -24,7 +24,7 @@ natural U/O pair collides with vsim's step toggle:
      N M             N / M   yaw left / right
                      R       reset envs
                      Esc     quit (or close the window)
-                     Up/Down up / down (command effects: student TODO)
+                     Up/Down raise / lower base height
 
 GLFW (MuJoCo) uses ASCII codes for letter keys, so `ord(letter)` is the
 keycode. Each viewer adapter translates named special keys such as UP/DOWN
@@ -53,43 +53,56 @@ HELP_LINES = (
     "  I/K           forward / back",
     "  J/L           strafe left / strafe right",
     "  N/M           yaw left / yaw right",
-    "  Up/Down       up / down (command effects: student TODO)",
+    "  Up/Down       raise / lower base height",
     "  R             reset envs",
     "  Esc / window  quit",
-    "  commands step in 1/5 increments of max",
+    "  commands change one step per key press",
 )
 
 
 class TeleopCommands:
     """Velocity-command limits, increments, and the effect of each action.
 
-    Engine-agnostic: it only touches ``env.commands`` and the reset path.
+    Engine-agnostic: updates velocity/height commands and the reset path.
     """
 
     def __init__(self, env):
         self.env = env
-
-        self.max_vel_forward = 4.0
-        self.max_vel_backward = -1.0
-        self.increment_x = (self.max_vel_forward - self.max_vel_backward) * 0.1
-
-        self.max_vel_sideways = 1.0
-        self.increment_y = self.max_vel_sideways * 0.2
-
-        self.max_vel_yaw = 2.0
-        self.increment_yaw = self.max_vel_yaw * 0.2
 
         ranges = getattr(
             getattr(getattr(env, "cfg", None), "commands", None),
             "ranges",
             None,
         )
+        # The keyboard should only request speeds seen during training.
+        forward_range = getattr(ranges, "lin_vel_x", [-1.0, 4.0])
+        self.max_vel_forward = max(0.0, max(forward_range))
+        self.max_vel_backward = min(0.0, min(forward_range))
+        self.increment_x = (self.max_vel_forward - self.max_vel_backward) * 0.1
+
+        self.max_vel_sideways = abs(getattr(ranges, "lin_vel_y", 1.0))
+        self.increment_y = self.max_vel_sideways * 0.2
+
+        self.max_vel_yaw = abs(getattr(ranges, "yaw_vel", 2.0))
+        self.increment_yaw = self.max_vel_yaw * 0.2
+
         self.base_height_range = getattr(ranges, "base_height", None)
         if self.base_height_range is not None:
             self.min_base_height, self.max_base_height = self.base_height_range
             self.increment_base_height = (
                 self.max_base_height - self.min_base_height
             ) * 0.2
+
+        if self.base_height_range is not None and hasattr(env, "base_height_command"):
+            settings = getattr(env.cfg, "reward_settings", None)
+            initial_height = getattr(
+                settings,
+                "base_height_target",
+                (self.min_base_height + self.max_base_height) / 2,
+            )
+            env.base_height_command.fill_(
+                min(self.max_base_height, max(self.min_base_height, initial_height))
+            )
 
         env.commands[:] = 0.0
         # Start height-control demonstrations standing still.
@@ -121,12 +134,13 @@ class TeleopCommands:
                 not hasattr(self.env, "base_height_command")
                 or self.base_height_range is None
             ):
-                raise ValueError("base-height teleop is unavailable for this environment")
+                raise ValueError(
+                    "base-height teleop is unavailable for this environment"
+                )
 
             direction = 1.0 if action == "up" else -1.0
             self.env.base_height_command[:] = torch.clamp(
-                self.env.base_height_command
-                + direction * self.increment_base_height,
+                self.env.base_height_command + direction * self.increment_base_height,
                 min=self.min_base_height,
                 max=self.max_base_height,
             )
