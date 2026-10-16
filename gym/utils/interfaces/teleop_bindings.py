@@ -56,58 +56,31 @@ HELP_LINES = (
     "  Up/Down       raise / lower base height",
     "  R             reset envs",
     "  Esc / window  quit",
-    "  commands change one step per key press",
+    "  commands step in 1/5 increments of max",
 )
 
 
 class TeleopCommands:
     """Velocity-command limits, increments, and the effect of each action.
 
-    Engine-agnostic: updates velocity/height commands and the reset path.
+    Engine-agnostic: it only touches ``env.commands`` and the reset path.
     """
 
     def __init__(self, env):
         self.env = env
 
-        ranges = getattr(
-            getattr(getattr(env, "cfg", None), "commands", None),
-            "ranges",
-            None,
-        )
-        # The keyboard should only request speeds seen during training.
-        forward_range = getattr(ranges, "lin_vel_x", [-1.0, 4.0])
-        self.max_vel_forward = max(0.0, max(forward_range))
-        self.max_vel_backward = min(0.0, min(forward_range))
+        self.max_vel_forward = 4.0
+        self.max_vel_backward = -1.0
         self.increment_x = (self.max_vel_forward - self.max_vel_backward) * 0.1
 
-        self.max_vel_sideways = abs(getattr(ranges, "lin_vel_y", 1.0))
+        self.max_vel_sideways = 1.0
         self.increment_y = self.max_vel_sideways * 0.2
 
-        self.max_vel_yaw = abs(getattr(ranges, "yaw_vel", 2.0))
+        self.max_vel_yaw = 2.0
         self.increment_yaw = self.max_vel_yaw * 0.2
 
-        self.base_height_range = getattr(ranges, "base_height", None)
-        if self.base_height_range is not None:
-            self.min_base_height, self.max_base_height = self.base_height_range
-            self.increment_base_height = (
-                self.max_base_height - self.min_base_height
-            ) * 0.2
-
-        if self.base_height_range is not None and hasattr(env, "base_height_command"):
-            settings = getattr(env.cfg, "reward_settings", None)
-            initial_height = getattr(
-                settings,
-                "base_height_target",
-                (self.min_base_height + self.max_base_height) / 2,
-            )
-            env.base_height_command.fill_(
-                min(self.max_base_height, max(self.min_base_height, initial_height))
-            )
-
         env.commands[:] = 0.0
-        # Start height-control demonstrations standing still.
-        if not hasattr(env, "base_height_command"):
-            env.commands[:, 0] = 1.0
+        env.commands[:, 0] = 1.0  # seed forward velocity so motion is visible
         if hasattr(env.cfg, "commands"):
             env.cfg.commands.resampling_time = env.max_episode_length_s + 1
 
@@ -128,23 +101,12 @@ class TeleopCommands:
             c[:, 2] = torch.clamp(c[:, 2] + self.increment_yaw, max=self.max_vel_yaw)
         elif action == "yaw_right":
             c[:, 2] = torch.clamp(c[:, 2] - self.increment_yaw, min=-self.max_vel_yaw)
-
-        elif action in ("up", "down"):
-            if (
-                not hasattr(self.env, "base_height_command")
-                or self.base_height_range is None
-            ):
-                raise ValueError(
-                    "base-height teleop is unavailable for this environment"
-                )
-
-            direction = 1.0 if action == "up" else -1.0
-            self.env.base_height_command[:] = torch.clamp(
-                self.env.base_height_command + direction * self.increment_base_height,
-                min=self.min_base_height,
-                max=self.max_base_height,
+        elif action in ("up", "down") and hasattr(self.env, "base_height_command"):
+            low, high = self.env.cfg.commands.ranges.base_height
+            step = (high - low) / 5
+            self.env.base_height_command.add_(step if action == "up" else -step).clamp_(
+                low, high
             )
-
         elif action == "reset":
             self.env.timed_out[:] = True
             self.env.reset()

@@ -98,8 +98,8 @@ def test_runner_observations_include_current_gait_phase_and_frequency(task):
             dim=-1,
         )
         for names, size in (
-            (runner_cfg.actor.obs, 48),
-            (runner_cfg.critic.obs, 52),
+            (runner_cfg.actor.obs, 49),
+            (runner_cfg.critic.obs, 53),
         ):
             observation = env.get_states(names)
             assert observation.shape == (env.num_envs, size)
@@ -218,3 +218,17 @@ def test_empty_reset_preserves_derived_observation_caches(task):
         )
     assert torch.equal(env.get_states(runner_cfg.actor.obs), actor)
     assert torch.equal(env.get_states(runner_cfg.critic.obs), critic)
+
+
+def test_height_command_resampling_is_masked_and_normalized(task):
+    env, _, _ = task
+    env.base_height_command.fill_(-1.0)
+    mask = torch.tensor([True, False, True, False], device=env.device)
+    env._resample_commands(mask)
+    low, high = env.cfg.commands.ranges.base_height
+    assert torch.all(env.base_height_command[mask] >= low)
+    assert torch.all(env.base_height_command[mask] <= high)
+    assert torch.all(env.base_height_command[~mask] == -1.0)
+    torch.testing.assert_close(
+        env.get_state("base_height_command"), env.base_height_command / 0.3
+    )

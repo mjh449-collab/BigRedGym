@@ -64,39 +64,9 @@ class FakeEnv:
         self._backend = FakeBackend()
         self.exit = False
         self.reset_count = 0
-        self.base_height_command = torch.full((num_envs, 1), 0.4)
-        self.cfg = SimpleNamespace(
-            commands=SimpleNamespace(
-                resampling_time=3.0,
-                ranges=SimpleNamespace(base_height=[0.25, 0.45]),
-            )
-        )
 
     def reset(self):
         self.reset_count += 1
-
-
-def test_height_actions_adjust_and_clamp_height_command():
-    env = FakeEnv()
-    cmds = TeleopCommands(env)
-
-    initial = env.base_height_command.clone()
-    cmds.apply("up")
-    assert torch.all(env.base_height_command > initial)
-
-    for _ in range(20):
-        cmds.apply("up")
-    torch.testing.assert_close(
-        env.base_height_command,
-        torch.full_like(env.base_height_command, cmds.max_base_height),
-    )
-
-    for _ in range(20):
-        cmds.apply("down")
-    torch.testing.assert_close(
-        env.base_height_command,
-        torch.full_like(env.base_height_command, cmds.min_base_height),
-    )
 
 
 def _make_vsim():
@@ -348,20 +318,18 @@ def test_viewer_configs_default_show_ui_false():
     assert FixedRobotCfg.viewer.show_ui is False
 
 
-def test_teleop_respects_training_limits_and_starts_at_a_known_height():
+def test_height_keys_clamp_target_without_changing_velocity():
     env = FakeEnv()
-    env.cfg.commands.ranges.lin_vel_x = [-0.5, 0.0, 0.5, 1.0, 2.0]
-    env.cfg.commands.ranges.lin_vel_y = 0.5
-    env.cfg.commands.ranges.yaw_vel = 1.5
-    env.cfg.reward_settings = SimpleNamespace(base_height_target=0.30)
-    env.base_height_command[:] = 0.25
+    env.base_height_command = torch.full((2, 1), 0.30)
+    env.cfg.commands = SimpleNamespace(ranges=SimpleNamespace(base_height=[0.18, 0.40]))
     ui = MujocoKeyboardInterface(env)
-    assert torch.all(env.commands == 0)
-    torch.testing.assert_close(env.base_height_command, torch.full((2, 1), 0.30))
-    ui._on_key(ord("I"))
-    assert env.commands[0, 0].item() == pytest.approx(0.25)
-    for _ in range(40):
-        ui._on_key(ord("I"))
-        ui._on_key(ord("J"))
-        ui._on_key(ord("N"))
-    torch.testing.assert_close(env.commands, torch.tensor([[2.0, 0.5, 1.5]] * 2))
+    velocity = env.commands.clone()
+    buffer = env.base_height_command
+    for _ in range(20):
+        ui._on_key(265)  # Up
+    torch.testing.assert_close(buffer, torch.full((2, 1), 0.40))
+    for _ in range(20):
+        ui._on_key(264)  # Down
+    torch.testing.assert_close(buffer, torch.full((2, 1), 0.18))
+    assert env.base_height_command is buffer
+    torch.testing.assert_close(env.commands, velocity)
