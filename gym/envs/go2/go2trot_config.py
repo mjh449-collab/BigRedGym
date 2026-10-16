@@ -115,6 +115,8 @@ class Go2TrotRunnerCfg(Go2RunnerCfg):
         activation = "elu"
         obs = [
             "base_ang_vel",
+            "base_height",
+            "base_height_command",
             "projected_gravity",
             "commands",
             "dof_pos_obs",
@@ -149,6 +151,7 @@ class Go2TrotRunnerCfg(Go2RunnerCfg):
             "base_ang_vel",
             "projected_gravity",
             "commands",
+            "base_height_command",
             "dof_pos_obs",
             "dof_vel",
             "dof_pos_target",
@@ -161,6 +164,7 @@ class Go2TrotRunnerCfg(Go2RunnerCfg):
             class weights:
                 tracking_lin_vel = 4.0
                 tracking_ang_vel = 4.0
+                tracking_base_height = 1.5
                 lin_vel_z = 0.0
                 ang_vel_xy = 0.01
                 orientation = 1.0
@@ -170,7 +174,7 @@ class Go2TrotRunnerCfg(Go2RunnerCfg):
                 dof_pos_limits = 0.0
                 feet_contact_forces = 0.0
                 dof_near_home = 0.0
-                min_base_height = 0.5
+                min_base_height = 0.0
                 action_rate = 0.1
                 action_rate2 = 0.05
                 trot_support = 3.0

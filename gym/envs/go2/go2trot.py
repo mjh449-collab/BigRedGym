@@ -9,10 +9,23 @@ from gym.envs.base.legged_robot import LeggedRobot
 class Go2Trot(LeggedRobot):
     def __init__(self, cfg, device, headless, backend):
         super().__init__(cfg, device, headless, backend)
-
+    def _reward_reference_traj(self):
+        """Reward joints for tracking the gait reference."""
+        indices = self.actuated_dof_indices
+        target = self.gait_reference + self.default_dof_pos.index_select(1, indices)
+        measured = self.dof_pos.index_select(1, indices)
+        scale = self.scales["dof_pos"].index_select(0, indices)
+        error = (target - measured) / scale
+        return (self._sqrdexp(error) - torch.abs(error) * 0.2).mean(dim=1)
     def _init_buffers(self):
         super()._init_buffers()
 
+        self.base_height_command = torch.full(
+            (self.num_envs, 1),
+            self.cfg.reward_settings.base_height_target,
+            dtype=torch.float,
+            device=self.device,
+        )
         self._actuated_dof_pos_limits = self.dof_pos_limits.index_select(
             0, self.actuated_dof_indices
         )
@@ -70,6 +83,33 @@ class Go2Trot(LeggedRobot):
     def _expected_stance(self):
         return torch.sin(self._leg_phases()) > 0
 
+    def _pre_decimation_step(self):
+        self._update_gait_reference()
+        reference = self.gait_reference + self.default_dof_pos.index_select(
+            1, self.actuated_dof_indices
+        )
+        # Bound the full PD position command. Keep the applied residual in the
+        # task buffer so observations and action-history rewards describe it;
+        # the runner retains its separate raw samples for PPO likelihoods.
+        self.dof_pos_target.clamp_(
+            min=self._actuated_dof_pos_limits[:, 0] - reference,
+            max=self._actuated_dof_pos_limits[:, 1] - reference,
+        )
+
+    def _compute_torques(self):
+        pos = self.dof_pos.index_select(1, self.actuated_dof_indices)
+        vel = self.dof_vel.index_select(1, self.actuated_dof_indices)
+        default_pos = self.default_dof_pos.index_select(1, self.actuated_dof_indices)
+        torques = (
+            self.p_gains
+            * (self.gait_reference + self.dof_pos_target + default_pos - pos)
+            + self.d_gains * (self.dof_vel_target - vel)
+            + self.tau_ff
+        )
+        return torch.clip(
+            torques, -self.actuated_torque_limits, self.actuated_torque_limits
+        ).view(self.torques.shape)
+
     def _reset_system(self, reset_mask):
         super()._reset_system(reset_mask)
         phase = torch_rand_float(
@@ -90,6 +130,14 @@ class Go2Trot(LeggedRobot):
     def _resample_commands(self, command_mask):
         super()._resample_commands(command_mask)
 
+        height_range = self.command_ranges["base_height"]
+        height_targets = torch_rand_float(
+            height_range[0],
+            height_range[1],
+            self.base_height_command.shape,
+            device=self.device,
+        )
+        masked_update(self.base_height_command, height_targets, command_mask)
         forward_commands = torch.tensor(
             self.command_ranges["lin_vel_x"], device=self.device
         )
@@ -143,7 +191,6 @@ class Go2Trot(LeggedRobot):
     def _post_decimation_step(self):
         super()._post_decimation_step()
         self._update_phase_observation()
-        self._update_gait_reference()
 
     def _foot_contact_strength(self):
         """Map upward foot load smoothly from zero to nominal body-weight."""
@@ -175,13 +222,6 @@ class Go2Trot(LeggedRobot):
         phase = torch.sin(self._leg_phases())
         return -torch.mean(torch.relu(-phase) * self._foot_contact_strength(), dim=1)
 
-    def _reward_reference_traj(self):
-        pos = self.dof_pos.index_select(1, self.actuated_dof_indices)
-        default_pos = self.default_dof_pos.index_select(1, self.actuated_dof_indices)
-        scale = self.scales["dof_pos"].index_select(0, self.actuated_dof_indices)
-        error = (self.gait_reference + default_pos - pos) / scale
-        return (self._sqrdexp(error) - 0.2 * error.abs()).mean(dim=1)
-
     def _reward_lin_vel_z(self):
         """Penalize z axis base linear velocity with squared exp"""
         return self._sqrdexp(self.base_lin_vel[:, 2] / self.scales["base_lin_vel"])
@@ -205,6 +245,13 @@ class Go2Trot(LeggedRobot):
         error /= self.scales["base_height"]
         error = torch.clamp(error, max=0, min=None).flatten()
         return self._sqrdexp(error)
+
+    def _reward_tracking_base_height(self):
+        """Reward tracking the commanded base height."""
+        error = (
+            self.base_height_command - self.base_height
+        ) / self.scales["base_height"]
+        return self._sqrdexp(error.flatten())
 
     def _reward_tracking_lin_vel(self):
         """Tracking of linear velocity commands (xy axes)"""

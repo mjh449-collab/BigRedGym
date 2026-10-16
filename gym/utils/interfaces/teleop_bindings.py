@@ -79,6 +79,18 @@ class TeleopCommands:
         self.max_vel_yaw = 2.0
         self.increment_yaw = self.max_vel_yaw * 0.2
 
+        ranges = getattr(
+            getattr(getattr(env, "cfg", None), "commands", None),
+            "ranges",
+            None,
+        )
+        self.base_height_range = getattr(ranges, "base_height", None)
+        if self.base_height_range is not None:
+            self.min_base_height, self.max_base_height = self.base_height_range
+            self.increment_base_height = (
+                self.max_base_height - self.min_base_height
+            ) * 0.2
+
         env.commands[:] = 0.0
         env.commands[:, 0] = 1.0  # seed forward velocity so motion is visible
         if hasattr(env.cfg, "commands"):
@@ -101,6 +113,22 @@ class TeleopCommands:
             c[:, 2] = torch.clamp(c[:, 2] + self.increment_yaw, max=self.max_vel_yaw)
         elif action == "yaw_right":
             c[:, 2] = torch.clamp(c[:, 2] - self.increment_yaw, min=-self.max_vel_yaw)
+
+        elif action in ("up", "down"):
+            if (
+                not hasattr(self.env, "base_height_command")
+                or self.base_height_range is None
+            ):
+                raise ValueError("base-height teleop is unavailable for this environment")
+
+            direction = 1.0 if action == "up" else -1.0
+            self.env.base_height_command[:] = torch.clamp(
+                self.env.base_height_command
+                + direction * self.increment_base_height,
+                min=self.min_base_height,
+                max=self.max_base_height,
+            )
+
         elif action == "reset":
             self.env.timed_out[:] = True
             self.env.reset()

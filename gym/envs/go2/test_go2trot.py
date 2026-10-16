@@ -69,3 +69,14 @@ def test_reference_reward_tracks_measured_joints_with_normalized_symmetric_error
             - 0.1
         )
         assert task._reward_reference_traj().item() == pytest.approx(expected.item())
+def test_tracking_base_height_reward_prefers_commanded_height():
+    task = Go2Trot.__new__(Go2Trot)
+    task.base_height_command = torch.tensor([[0.3], [0.5]])
+    task.base_height = torch.tensor([[0.3], [0.3]])
+    task.scales = {"base_height": 0.3}
+    task.cfg = Go2TrotCfg()
+
+    reward = task._reward_tracking_base_height()
+
+    assert reward[0].item() == pytest.approx(1.0)
+    assert reward[1] < reward[0]

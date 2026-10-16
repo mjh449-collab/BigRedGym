@@ -64,9 +64,39 @@ class FakeEnv:
         self._backend = FakeBackend()
         self.exit = False
         self.reset_count = 0
+        self.base_height_command = torch.full((num_envs, 1), 0.4)
+        self.cfg = SimpleNamespace(
+            commands=SimpleNamespace(
+                resampling_time=3.0,
+                ranges=SimpleNamespace(base_height=[0.25, 0.45]),
+            )
+        )
 
     def reset(self):
         self.reset_count += 1
+
+
+def test_height_actions_adjust_and_clamp_height_command():
+    env = FakeEnv()
+    cmds = TeleopCommands(env)
+
+    initial = env.base_height_command.clone()
+    cmds.apply("up")
+    assert torch.all(env.base_height_command > initial)
+
+    for _ in range(20):
+        cmds.apply("up")
+    torch.testing.assert_close(
+        env.base_height_command,
+        torch.full_like(env.base_height_command, cmds.max_base_height),
+    )
+
+    for _ in range(20):
+        cmds.apply("down")
+    torch.testing.assert_close(
+        env.base_height_command,
+        torch.full_like(env.base_height_command, cmds.min_base_height),
+    )
 
 
 def _make_vsim():
