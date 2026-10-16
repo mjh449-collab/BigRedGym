@@ -9,6 +9,7 @@ from gym.envs.base.legged_robot import LeggedRobot
 class Go2Trot(LeggedRobot):
     def __init__(self, cfg, device, headless, backend):
         super().__init__(cfg, device, headless, backend)
+
     def _reward_reference_traj(self):
         """Reward joints for tracking the gait reference."""
         indices = self.actuated_dof_indices
@@ -17,6 +18,7 @@ class Go2Trot(LeggedRobot):
         scale = self.scales["dof_pos"].index_select(0, indices)
         error = (target - measured) / scale
         return (self._sqrdexp(error) - torch.abs(error) * 0.2).mean(dim=1)
+
     def _init_buffers(self):
         super()._init_buffers()
 
@@ -137,6 +139,18 @@ class Go2Trot(LeggedRobot):
             self.base_height_command.shape,
             device=self.device,
         )
+        # Explicit endpoint samples teach the poses used by keyboard teleop.
+        endpoint_targets = torch.where(
+            torch.rand_like(height_targets) < 0.5,
+            height_range[0],
+            height_range[1],
+        )
+        height_targets = torch.where(
+            torch.rand_like(height_targets)
+            < getattr(self.cfg.commands, "height_endpoint_probability", 0.0),
+            endpoint_targets,
+            height_targets,
+        )
         masked_update(self.base_height_command, height_targets, command_mask)
         forward_commands = torch.tensor(
             self.command_ranges["lin_vel_x"], device=self.device
@@ -162,7 +176,8 @@ class Go2Trot(LeggedRobot):
             )
             self.commands[:, :2].masked_fill_(drop, 0.0)
             drop = command_mask.unsqueeze(1) & (
-                torch.rand(self.num_envs, 1, device=self.device) >= 0.9
+                torch.rand(self.num_envs, 1, device=self.device)
+                < getattr(self.cfg.commands, "standing_probability", 0.1)
             )
             self.commands.masked_fill_(drop, 0.0)
 
@@ -247,11 +262,15 @@ class Go2Trot(LeggedRobot):
         return self._sqrdexp(error)
 
     def _reward_tracking_base_height(self):
-        """Reward tracking the commanded base height."""
-        error = (
-            self.base_height_command - self.base_height
-        ) / self.scales["base_height"]
-        return self._sqrdexp(error.flatten())
+        """Track height with a tolerance in meters, separate from observation scaling."""
+        error = (self.base_height_command - self.base_height).flatten()
+        tolerance = getattr(
+            self.cfg.reward_settings,
+            "height_tracking_tolerance",
+            self.scales["base_height"]
+            * self.cfg.reward_settings.tracking_sigma**0.5,
+        )
+        return torch.exp(-torch.square(error / tolerance))
 
     def _reward_tracking_lin_vel(self):
         """Tracking of linear velocity commands (xy axes)"""

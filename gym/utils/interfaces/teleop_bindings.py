@@ -92,7 +92,9 @@ class TeleopCommands:
             ) * 0.2
 
         env.commands[:] = 0.0
-        env.commands[:, 0] = 1.0  # seed forward velocity so motion is visible
+        # Start height-control demonstrations standing still.
+        if not hasattr(env, "base_height_command"):
+            env.commands[:, 0] = 1.0
         if hasattr(env.cfg, "commands"):
             env.cfg.commands.resampling_time = env.max_episode_length_s + 1
 
