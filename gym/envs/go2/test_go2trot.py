@@ -74,7 +74,7 @@ def test_reference_reward_tracks_measured_joints_with_normalized_symmetric_error
 def test_height_reward_tracks_command_with_symmetric_error():
     task = Go2Trot.__new__(Go2Trot)
     task.base_height = torch.full((3, 1), 0.30)
-    task.base_height_command = torch.tensor([[0.30], [0.25], [0.35]])
+    task.base_height_command = torch.tensor([[0.30], [0.27], [0.33]])
     torch.testing.assert_close(
         task._reward_tracking_base_height(),
         torch.tensor([0.0, -1.0, -1.0]).exp(),

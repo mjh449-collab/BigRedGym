@@ -211,7 +211,7 @@ class MuJocoBackendBase(SimBackend):
         spec.option.disableflags = cfg.mujoco.disableflags
 
         mjm = spec.compile()
-        if visual_model_path is not None:
+        if visual_model_path is not None and os.path.isfile(visual_model_path):
             # Group 3 is hidden by default in MuJoCo. Keep collision geometry
             # available for inspection without covering the detailed visuals.
             collision = (mjm.geom_contype != 0) | (mjm.geom_conaffinity != 0)
@@ -447,7 +447,7 @@ class MuJocoBackendBase(SimBackend):
         so the compile doesn't fail looking for a decoder.
         """
         root = ET.parse(urdf_path).getroot()
-        if visual_model_path is not None:
+        if visual_model_path is not None and os.path.isfile(visual_model_path):
             replace_visuals_from_mjcf(root, visual_model_path)
         has_unsupported = any(
             (m.get("filename") or "").lower().endswith((".dae", ".collada"))

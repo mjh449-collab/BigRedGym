@@ -210,9 +210,9 @@ class Go2Trot(LeggedRobot):
         return torch.sum(torch.exp(-error), dim=1)
 
     def _reward_tracking_base_height(self):
-        """Track commanded height with a 5 cm error tolerance."""
+        """Track commanded height with a 3 cm error tolerance."""
         error = (self.base_height - self.base_height_command).flatten()
-        return torch.exp(-torch.square(error / 0.05))
+        return torch.exp(-torch.square(error / 0.03))
 
     def _reward_min_base_height(self):
         """Squared exponential saturating at base_height target"""

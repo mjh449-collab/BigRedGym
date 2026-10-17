@@ -65,7 +65,7 @@ class Go2TrotCfg(Go2Cfg):
             lin_vel_x = [-0.5, 0.0, 0.5, 1.0, 2.0]
             lin_vel_y = 0.5
             yaw_vel = 1.5
-            base_height = [0.18, 0.40]  # meters
+            base_height = [0.15, 0.40]  # meters
 
     class push_robots(Go2Cfg.push_robots):
         toggle = True
@@ -177,7 +177,7 @@ class Go2TrotRunnerCfg(Go2RunnerCfg):
                 action_rate2 = 0.05
                 trot_support = 3.0
                 swing_contact = 3.0
-                reference_traj = 3.0
+                reference_traj = 1.0
 
             class termination_weight:
                 termination = 0.01
