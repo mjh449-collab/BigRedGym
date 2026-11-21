@@ -13,6 +13,7 @@ class Go2Trot(LeggedRobot):
 
     def _init_buffers(self):
         super()._init_buffers()
+        self.last_applied_dof_pos_target = torch.zeros_like(self.dof_pos_target)
 
         self._actuated_dof_pos_limits = self.dof_pos_limits.index_select(
             0, self.actuated_dof_indices
@@ -89,6 +90,7 @@ class Go2Trot(LeggedRobot):
         return torch.remainder(
             self.phase + self._gait_phase_offsets.unsqueeze(0), 2 * torch.pi
         )
+
     def _speed_scale(self):
         """1 up to nominal height then shrink linearly to 0.4 at max height"""
         h0 = 0.33
@@ -161,6 +163,7 @@ class Go2Trot(LeggedRobot):
     def _reset_idx(self, reset_mask):
         super()._reset_idx(reset_mask)
         self.dof_pos_target.masked_fill_(reset_mask.unsqueeze(1), 0.0)
+        self.last_applied_dof_pos_target.masked_fill_(reset_mask.unsqueeze(1), 0.0)
         self._update_gait_reference()
         masked_update(
             self.dof_pos_history,
@@ -180,6 +183,17 @@ class Go2Trot(LeggedRobot):
     def _post_physics_step(self):
         super()._post_physics_step()
         self._advance_phase()
+
+    def _pre_decimation_step(self):
+        super()._pre_decimation_step()
+        # Apply once per policy tick. The next actor observation sees the
+        # applied offset, just as it does in the custom controller.
+        alpha = getattr(self.cfg.control, "action_ema_alpha", 1.0)
+        if alpha < 1.0:
+            self.dof_pos_target.copy_(
+                torch.lerp(self.last_applied_dof_pos_target, self.dof_pos_target, alpha)
+            )
+        self.last_applied_dof_pos_target.copy_(self.dof_pos_target)
 
     def _advance_phase(self):
         # phase_frequency is in cycles/s; _post_physics_step runs once per
@@ -287,10 +301,13 @@ class Go2Trot(LeggedRobot):
 
     def _reward_tracking_lin_vel(self):
         """Tracking of linear velocity commands (xy axes)"""
-        # just use lin_vel?
         error = self.commands[:, :2] - self.base_lin_vel[:, :2]
-        # * scale by (1+|cmd|): if cmd=0, no scaling.
-        error *= 1.0 / (1.0 + torch.abs(self.commands[:, :2]))
+        scale = 1.0 + self.commands[:, :2].abs()
+        if not getattr(
+            self.cfg.reward_settings, "normalize_forward_tracking_error", True
+        ):
+            scale[:, 0] = 1.0
+        error = error / scale
         error = torch.sum(torch.square(error), dim=1)
         return torch.exp(-error / self.cfg.reward_settings.tracking_sigma)
 

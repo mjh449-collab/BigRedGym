@@ -159,14 +159,7 @@ def summarize_case(trace, dt, warmup_steps, frequency, command):
 
 
 @torch.no_grad()
-def evaluate(env, runner, *, replicas=4, seconds=8.0, warmup=2.0):
-    cases = [(name, hz) for name in COMMANDS for hz in (1.0, 2.0, 3.0)]
-    commands = torch.tensor(
-        [COMMANDS[name] for name, _ in cases], device=env.device
-    ).repeat_interleave(replicas, dim=0)
-    frequencies = torch.tensor(
-        [hz for _, hz in cases], device=env.device
-    ).repeat_interleave(replicas)
+def record_traces(env, runner, commands, frequencies, seconds):
     env.phase_frequency[:, 0] = frequencies
     env.commands[:] = commands
     alive = torch.ones(env.num_envs, device=env.device, dtype=torch.bool)
@@ -182,6 +175,8 @@ def evaluate(env, runner, *, replicas=4, seconds=8.0, warmup=2.0):
             "load",
             "phase",
             "body_weight",
+            "height",
+            "torque_fraction",
         )
     }
     total_mass = env._backend.link_mass.sum(dim=1) + env._backend.payload_mass
@@ -192,6 +187,10 @@ def evaluate(env, runner, *, replicas=4, seconds=8.0, warmup=2.0):
         actions = runner.get_inference_actions()
         runner.set_actions(runner.actor_cfg["actions"], actions)
         requested = env.dof_pos_target.clone()
+        alpha = getattr(env.cfg.control, "action_ema_alpha", 1.0)
+        if alpha < 1.0:
+            # Smoothing is intentional; only count discarded motion after it.
+            requested = torch.lerp(env.last_applied_dof_pos_target, requested, alpha)
         phase = env.phase.clone()
         env.step()
         alive &= ~env.terminated
@@ -207,12 +206,26 @@ def evaluate(env, runner, *, replicas=4, seconds=8.0, warmup=2.0):
             "load": env.contact_forces[:, env.feet_indices, 2],
             "phase": phase,
             "body_weight": body_weight,
+            "height": env.base_height[:, 0],
+            "torque_fraction": env.torques.abs() / env.actuated_torque_limits,
         }
         for key, value in values.items():
             records[key].append(value.clone())
     trace = {key: torch.stack(value).cpu() for key, value in records.items()}
     if not all(torch.isfinite(value).all() for value in trace.values()):
         raise RuntimeError("Nonfinite evaluation trajectory")
+    return trace
+
+
+def evaluate(env, runner, *, replicas=4, seconds=8.0, warmup=2.0):
+    cases = [(name, hz) for name in COMMANDS for hz in (1.0, 2.0, 3.0)]
+    commands = torch.tensor(
+        [COMMANDS[name] for name, _ in cases], device=env.device
+    ).repeat_interleave(replicas, dim=0)
+    frequencies = torch.tensor(
+        [hz for _, hz in cases], device=env.device
+    ).repeat_interleave(replicas)
+    trace = record_traces(env, runner, commands, frequencies, seconds)
     results = {}
     for i, (name, hz) in enumerate(cases):
         selection = slice(i * replicas, (i + 1) * replicas)

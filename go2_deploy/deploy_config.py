@@ -5,16 +5,16 @@ import torch
 class DeployConfig:
     task_name = "go2trot"
 
-    ctrl_freq = 100  # Hz
+    ctrl_freq = Go2TrotCfg.control.ctrl_frequency  # Hz
 
-    kp = 30.0  # Stiffness constant
-    kd = 2.0  # Damping constant
+    kp = Go2TrotCfg.control.kp
+    kd = Go2TrotCfg.control.kd
 
     phase_frequency = 2.0  # Go2Trot gait frequency in Hz (cycles/s)
 
     # Apply exponential moving average to actions
-    exp_moving_avg = True
-    ema_smoothing_factor = 0.1
+    ema_smoothing_factor = Go2TrotCfg.control.action_ema_alpha
+    exp_moving_avg = ema_smoothing_factor < 1.0
 
     obs_vector = [
         "base_ang_vel",

@@ -35,10 +35,15 @@ class Go2TrotCfg(Go2Cfg):
         ]
 
     class control(Go2Cfg.control):
-        stiffness = {"hip": 20.0, "thigh": 20.0, "calf": 20.0}
-        damping = {"hip": 0.5, "thigh": 0.5, "calf": 0.5}
-        ctrl_frequency = 50
-        desired_sim_frequency = 50
+        # Nominal settings from the Go2 custom controller. Episode
+        # randomization samples around these gains during training.
+        kp = 30.0
+        kd = 2.0
+        stiffness = dict.fromkeys(("hip", "thigh", "calf"), kp)
+        damping = dict.fromkeys(("hip", "thigh", "calf"), kd)
+        ctrl_frequency = 100
+        desired_sim_frequency = 100
+        action_ema_alpha = 0.1
         gait_freq = [1.0, 3.0]  # oscillator frequency range [Hz]
         # Cycle offsets define a trot: front-left/rear-right move together,
         # half a cycle away from front-right/rear-left.
@@ -104,6 +109,8 @@ class Go2TrotCfg(Go2Cfg):
 
     class reward_settings(Go2Cfg.reward_settings):
         base_height_target = Go2Cfg.reward_settings.base_height_target
+        # Give a given forward speed error the same cost at every command.
+        normalize_forward_tracking_error = False
 
     class scaling(Go2Cfg.scaling):
         # Canonical RobotLayout order is FL, FR, RL, RR, with
