@@ -5,6 +5,7 @@ messages; they do not compare deployment against a simulated task.
 """
 
 import math
+from threading import Lock
 from types import SimpleNamespace
 
 import pytest
@@ -72,6 +73,21 @@ def test_zero_action_and_nominal_posture_have_zero_relative_observations():
     torch.testing.assert_close(
         deploy_utility._get_obs_dof_pos_obs(controller, message), torch.zeros(12)
     )
+
+
+def test_hold_position_uses_measured_angles_and_seeds_filter_history():
+    controller, message = _controller(), _message()
+    controller.last_action_lock = Lock()
+    controller.default_lowcmd = SimpleNamespace(
+        motor_cmd=[SimpleNamespace() for _ in range(12)]
+    )
+    action = deploy_utility.hold_position_action(controller, message)
+    alpha = controller.cfg.ema_smoothing_factor
+    filtered_action = alpha * action + (1 - alpha) * controller.last_action[0]
+    command = deploy_utility.action_to_lowcmd(controller, filtered_action)
+
+    assert [motor.q for motor in command.motor_cmd] == pytest.approx(range(12))
+    torch.testing.assert_close(controller.last_action[1], action)
 
 
 def test_wxyz_quaternion_projects_gravity_but_gyro_is_already_body_local():

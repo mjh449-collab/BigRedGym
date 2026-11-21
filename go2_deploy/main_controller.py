@@ -5,7 +5,6 @@ import math
 from go2_deploy.state import State
 from go2_deploy.rl_controller import RLController
 from go2_deploy.unitree_remote_controller import UnitreeRemoteController, RCHandler
-from go2_deploy.deploy_config import DeployConfig
 from go2_deploy.utility import deploy_utility
 from go2_deploy.utility.csv_logger import CSVLogger
 from go2_deploy.utility.thread import RecurrentThread
@@ -28,7 +27,7 @@ from unitree_sdk2py.utils.crc import CRC
 
 
 class MainController:
-    def __init__(self):
+    def __init__(self, rl_controller=None):
         # Flags are monitored by watchdog_thread to switch between states
         self._state = State.EMERGENCY_STOP
         self._estop_flag = False
@@ -36,10 +35,10 @@ class MainController:
         self._intermediate_flag = False
         self._custom_ctrl_flag = False
 
-        self.rl_controller = RLController()
+        self.rl_controller = RLController() if rl_controller is None else rl_controller
         self.remote_controller = UnitreeRemoteController()
         self.rc_handler = RCHandler(self)
-        self.cfg = DeployConfig()
+        self.cfg = self.rl_controller.cfg
         self.csv_logger = CSVLogger(self)
 
         self.obs_vec_size = 0
@@ -206,7 +205,7 @@ class MainController:
         if self._state == State.CUSTOM_CTRL:
             return self.rl_controller.act(last_obs)
         elif self._state == State.INTERMEDIATE:
-            return deploy_utility.target_pos_to_action(self, self.intermediate_pos)
+            return self.intermediate_action
         else:
             return self.last_action[0]
 
@@ -320,16 +319,14 @@ class MainController:
             print("Must be in recovery state to switch to intermediate")
             return
 
+        with self.last_lowstate_msg_lock:
+            lowstate = self.last_lowstate_msg
+        if lowstate is None:
+            print("Waiting for joint measurements before entering intermediate mode")
+            return
+        self.intermediate_action = deploy_utility.hold_position_action(self, lowstate)
         self._state = State.INTERMEDIATE
         print("Switching to intermediate")
-
-        self.intermediate_pos = (
-            torch.tensor(
-                deploy_utility._get_obs_dof_pos_obs(self, self.last_lowstate_msg)
-            )
-            .detach()
-            .clone()
-        )
 
         self.motion_switcher_client.ReleaseMode()
         mode = self.motion_switcher_client.CheckMode()[1]["name"]

@@ -77,6 +77,33 @@ controller semantics.
 
 ## Deployment
 
+For a measured session, select an exact checkpoint so an unrelated training run
+cannot change which policy is used. Check the file before connecting to the Go2:
+
+```bash
+uv run python -m go2_deploy.deploy --preflight --policy-checkpoint "$GO2_CHECKPOINT"
+```
+
+Preflight loads the actor and runs one synthetic inference offline. Use a
+checkpoint that has passed the intended simulation case and whose training config
+matches the deployment settings. The original November 10 Go2Trot checkpoint
+expects a height input that the current controller does not send. See
+[Go2 payload transfer candidate](README_PAYLOAD_SIM2REAL.md) for the migration
+and measured simulation results.
+
+When using an approved checkpoint for a hardware session, pass the same
+`--policy-checkpoint "$GO2_CHECKPOINT"` argument along with the interface.
+Deployment will record the path and SHA-256 hash in `logs/deploy/<run>/meta.json`.
+Keep that file with `control.csv`, `lowstate.csv`, and the video so the run can
+be matched to its controller settings, actual timing, and measured motion.
+
+For the first session, start unloaded and check that low-state telemetry is
+arriving and that `INTERMEDIATE` holds the measured standing pose. Verify the
+stop control with the operator before attempting locomotion. Begin with a low
+forward command only after the selected policy has passed the matching unloaded
+simulation case. Add payload after the unloaded trial and the intended loaded
+simulation case pass.
+
 If anything goes wrong, the emergency stop on the wireless controller is X or the enter key in the terminal.
 
 - Make sure your trained policy is in `logs/`, and that the observation vector, scaling, and other settings in `deploy_config.py` are all correct.

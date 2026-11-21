@@ -37,6 +37,14 @@ def _get_obs_dof_pos_obs(main_controller, lowstate_msg):
     )
 
 
+def hold_position_action(main_controller, lowstate_msg):
+    """Hold measured angles and seed the filter with that same target."""
+    offset = _get_obs_dof_pos_obs(main_controller, lowstate_msg)
+    with main_controller.last_action_lock:
+        main_controller.last_action[:] = offset
+    return offset
+
+
 def _get_obs_dof_vel(main_controller, lowstate_msg):
     motor_states = lowstate_msg.motor_state
     dof_vel_unitree_convention = torch.zeros(12)

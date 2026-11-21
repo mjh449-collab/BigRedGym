@@ -67,3 +67,21 @@ def test_deploy_missing_sdk_explains_extra():
     assert "--extra unitree_sdk" in result.stderr
     assert "README_DEPLOY.md" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_preflight_rejects_checkpoint_with_extra_height_input_before_sdk(tmp_path):
+    checkpoint = tmp_path / "old_policy.pt"
+    result = _without_sdk(f"""
+        import runpy
+        import torch
+
+        torch.save({{"actor_state_dict": {{"NN.0.weight": torch.zeros(256, 49)}}}},
+                   {str(checkpoint)!r})
+        sys.argv = [
+            "go2_deploy.deploy", "eth0", "--policy-checkpoint", {str(checkpoint)!r},
+        ]
+        runpy.run_module("go2_deploy.deploy", run_name="__main__")
+    """)
+    assert result.returncode == 2, result.stderr
+    assert "Checkpoint expects 49 inputs; this deploy config sends 48" in result.stderr
+    assert "Unitree SDK" not in result.stderr

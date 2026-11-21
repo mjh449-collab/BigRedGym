@@ -2,7 +2,12 @@ from gym.utils.task_registry import task_registry
 from gym.utils.helpers import set_seed
 import gym.envs  # noqa: F401
 from go2_deploy.deploy_config import DeployConfig
+from gym.envs.go2.go2trot_config import Go2TrotRunnerCfg
+from learning.modules.actor import Actor
 
+import hashlib
+import io
+from pathlib import Path
 import random
 import torch
 
@@ -45,11 +50,50 @@ def setup_actor(run_name=None):
 
 
 class RLController:
-    def __init__(self):
-        self.actor = setup_actor()
+    def __init__(self, checkpoint_path=None):
         self.cfg = DeployConfig()
+        self.checkpoint_path = None
+        self.checkpoint_sha256 = None
+        if checkpoint_path is None:
+            self.actor = setup_actor()
+        else:
+            self._load_selected_actor(Path(checkpoint_path).resolve())
+
+    def _load_selected_actor(self, path):
+        config = Go2TrotRunnerCfg.actor
+        if config.obs != self.cfg.obs_vector or config.actions != ["dof_pos_target"]:
+            raise ValueError(
+                "Training and deployment observation or action layouts differ"
+            )
+        num_obs = sum(self.cfg.obs_sizes[name] for name in self.cfg.obs_vector)
+        num_actions = self.cfg.default_dof_pos.numel()
+        data = path.read_bytes()
+        checkpoint = torch.load(io.BytesIO(data), weights_only=True, map_location="cpu")
+        actor = Actor(
+            num_obs,
+            num_actions,
+            config.hidden_dims,
+            activation=config.activation,
+            normalize_obs=config.normalize_obs,
+        )
+        weights = checkpoint["actor_state_dict"]
+        trained_obs = weights["NN.0.weight"].shape[1]
+        if trained_obs != num_obs:
+            raise ValueError(
+                f"Checkpoint expects {trained_obs} inputs; this deploy config sends "
+                f"{num_obs}. Use a checkpoint trained or migrated for this layout."
+            )
+        actor.load_state_dict(weights)
+        self.actor = actor.eval()
+        if not torch.isfinite(self.act(torch.zeros(num_obs))).all():
+            raise ValueError(
+                "Checkpoint produced nonfinite actions in offline preflight"
+            )
+        self.checkpoint_path = str(path)
+        self.checkpoint_sha256 = hashlib.sha256(data).hexdigest()
 
     # Returns torch.tensor(12): offsets from the static default posture in radians.
+    @torch.inference_mode()
     def act(self, obs_vector):
         scale = torch.tensor(getattr(self.cfg.DeployScaling, "dof_pos_target", 1.0))
         return self.actor.act_inference(obs_vector) * scale

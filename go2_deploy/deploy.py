@@ -1,12 +1,49 @@
 import argparse
+import pickle
 import sys
 import time
 
 
 def main():
     parser = argparse.ArgumentParser(description="Deploy a policy to a Unitree Go2.")
-    parser.add_argument("interface", help="Robot network interface, e.g. eth0")
+    parser.add_argument(
+        "interface", nargs="?", help="Robot network interface, e.g. eth0"
+    )
+    parser.add_argument("--policy-checkpoint", help="Exact model_*.pt file to use")
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Check a policy offline without the SDK",
+    )
     args = parser.parse_args()
+    if args.preflight and not args.policy_checkpoint:
+        parser.error("--preflight requires --policy-checkpoint")
+    if not args.preflight and not args.interface:
+        parser.error("a robot network interface is required for deployment")
+
+    policy = None
+    if args.policy_checkpoint:
+        from go2_deploy.rl_controller import RLController
+
+        try:
+            policy = RLController(args.policy_checkpoint)
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            KeyError,
+            pickle.UnpicklingError,
+        ) as exc:
+            parser.error(f"Policy preflight failed: {exc}")
+        print(f"Policy checkpoint: {policy.checkpoint_path}")
+        print(f"Policy SHA-256: {policy.checkpoint_sha256}")
+        cfg = policy.cfg
+        print(f"Controller defaults: {cfg.ctrl_freq} Hz, Kp {cfg.kp}, Kd {cfg.kd}")
+        print(f"Action EMA alpha: {cfg.ema_smoothing_factor}")
+    if args.preflight:
+        print("Offline checkpoint load and inference passed. No robot connection used.")
+        return
+
     if sys.platform != "linux":
         parser.error("Go2 deployment requires Linux (timerfd).")
 
@@ -34,7 +71,7 @@ def main():
         0,
         args.interface,
     )
-    controller = MainController()  # noqa: F841
+    controller = MainController(rl_controller=policy)
     keyboard_handler = KeyboardHandler(controller)  # noqa: F841
 
     print(
@@ -42,8 +79,11 @@ def main():
         + "always have access to the remote controller\n"
     )
 
-    while True:
-        time.sleep(1)
+    try:
+        while True:
+            time.sleep(1)
+    finally:
+        controller.csv_logger.close()
 
 
 if __name__ == "__main__":
