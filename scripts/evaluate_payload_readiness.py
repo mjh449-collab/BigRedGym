@@ -100,6 +100,11 @@ def main():
     parser.add_argument("--replicas", type=int)
     parser.add_argument("--seconds", type=float, default=20)
     parser.add_argument("--com-offset-m", type=float, nargs=3, metavar=("X", "Y", "Z"))
+    parser.add_argument(
+        "--policy-hz", type=int, help="Override both policy and physics rate"
+    )
+    parser.add_argument("--gains", type=float, nargs=2, metavar=("KP", "KD"))
+    parser.add_argument("--ema-alpha", type=float, help="Set to 1 for no smoothing")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     nominal = args.suite == "nominal"
@@ -122,6 +127,12 @@ def main():
     if args.com_offset_m is not None:
         if args.suite != "stress" or not all(map(math.isfinite, args.com_offset_m)):
             parser.error("use a finite COM offset only with --suite stress")
+    if args.policy_hz is not None and args.policy_hz <= 20:
+        parser.error("--policy-hz must exceed 20 Hz to measure jitter above 10 Hz")
+    if args.gains is not None and not all(0 < gain < math.inf for gain in args.gains):
+        parser.error("--gains must be finite and positive")
+    if args.ema_alpha is not None and not 0 < args.ema_alpha <= 1:
+        parser.error("--ema-alpha must be in (0, 1]")
 
     import gym.envs  # noqa: F401
 
@@ -134,6 +145,15 @@ def main():
         )
     )
     env_cfg.env.num_envs = len(masses) * replicas
+    if args.policy_hz is not None:
+        env_cfg.control.ctrl_frequency = args.policy_hz
+        env_cfg.control.desired_sim_frequency = args.policy_hz
+    if args.gains is not None:
+        kp, kd = args.gains
+        env_cfg.control.stiffness = dict.fromkeys(env_cfg.control.stiffness, kp)
+        env_cfg.control.damping = dict.fromkeys(env_cfg.control.damping, kd)
+    if args.ema_alpha is not None:
+        env_cfg.control.action_ema_alpha = args.ema_alpha
     env_cfg.env.episode_length_s = args.seconds + 1
     env_cfg.commands.resampling_time = args.seconds + 1
     env_cfg.commands.ranges.base_height = [HEIGHT, HEIGHT]
